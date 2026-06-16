@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Dataset
+data/
+datasets/
+
+# Images
+*.jpg
+*.jpeg
+*.png
+
+# YOLO weights
+*.pt
+
+# Training outputs
+runs/
+checkpoints/
+
+# IDE
+.vscode/

@@ -29,8 +29,7 @@ import yaml
 from tqdm import tqdm
 
 import sys
-sys.path.append(str(Path(__file__).resolve().parents[1]))
-from configs.task_config import (
+from files.configs.task_config import (
     TASK_NAMES, TASK_TO_COCO_CATS, PATHS,
     TASKS_NEEDING_CUSTOM_DATA,
 )
@@ -79,7 +78,7 @@ def assign_dominant_task(annotations, cat_to_tasks):
         return None, []
 
     # Pick the task with the most relevant objects
-    dominant_task = max(task_counts, key=task_counts.get)
+    dominant_task = max(task_counts.items(), key=lambda item: item[1])[0]
     # Return only annotations that belong to the dominant task
     dominant_cat_ids = set(TASK_TO_COCO_CATS[dominant_task])
     dominant_anns = [a for a in annotations if a["category_id"] in dominant_cat_ids]

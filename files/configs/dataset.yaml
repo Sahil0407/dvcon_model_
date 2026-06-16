@@ -1,0 +1,19 @@
+names:
+  0: step on something
+  1: sit comfortably
+  2: place flowers
+  3: get potatoes out of fire
+  4: water plant
+  5: get lemon out of tea
+  6: dig hole
+  7: open bottle of beer
+  8: open parcel
+  9: serve wine
+  10: pour sugar
+  11: smear butter
+  12: extinguish fire
+  13: pound carpet
+nc: 14
+path: /home/sahil/dvcon_model/files
+train: /home/sahil/dvcon_model/files/data/filtered/train/images
+val: /home/sahil/dvcon_model/files/data/filtered/val/images

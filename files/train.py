@@ -195,10 +195,26 @@ def train(resume_path=None):
         start_epoch = load_checkpoint(resume_path, yolo_model, film_manager, optimizer) + 1
 
     # ── 6. Loss Function ───────────────────────────────────────────────────────
-    from ultralytics.utils.loss import v8DetectionLoss
-    yolo_loss_fn = v8DetectionLoss(yolo_model.model)
+    try:
+        from ultralytics.yolo.utils.loss import v8DetectionLoss
+    except ImportError:
+        from ultralytics.utils.loss import v8DetectionLoss
+    from types import SimpleNamespace
 
-    best_val_loss   = float("inf")
+    # Convert args dict → object if necessary
+    if isinstance(yolo_model.model.args, dict):
+        yolo_model.model.args = SimpleNamespace(**yolo_model.model.args)
+
+    print("Model args type:", type(yolo_model.model.args))
+    print(vars(yolo_model.model.args))
+    # Add missing YOLO loss hyperparameters
+    args = yolo_model.model.args
+
+    args.box = 7.5     # bounding box loss gain
+    args.cls = 0.5     # classification loss gain
+    args.dfl = 1.5     # distribution focal loss gain
+    yolo_loss_fn = v8DetectionLoss(yolo_model.model)
+    best_val_loss = float("inf")
     patience_counter = 0
 
     # ── 7. Epoch Loop ──────────────────────────────────────────────────────────
@@ -257,9 +273,16 @@ def train(resume_path=None):
             # Format labels: prepend batch_idx for v8DetectionLoss
             targets = format_labels_for_loss(labels_list, device)
 
-            # Compute YOLO detection loss
-            loss, loss_items = yolo_loss_fn(preds, targets)
+            batch = {
+                "batch_idx": targets[:, 0].long(),
+                "cls": targets[:, 1:2].long(),
+                "bboxes": targets[:, 2:]
+            }
 
+            # Compute YOLO detection loss
+            loss, loss_items = yolo_loss_fn(preds, batch)
+            
+            loss = loss.sum()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(
                 list(yolo_model.model.parameters()) +
@@ -267,7 +290,7 @@ def train(resume_path=None):
                 max_norm=10.0
             )
             optimizer.step()
-
+            loss = loss.sum()
             total_train_loss += loss.item()
 
             if batch_idx % 50 == 0:
@@ -290,7 +313,17 @@ def train(resume_path=None):
                 film_manager.set_task_embedding(task_emb)
                 preds = yolo_model.model(images)
                 targets = format_labels_for_loss(labels_list, device)
-                loss, _ = yolo_loss_fn(preds, targets)
+
+                batch = {
+                    "batch_idx": targets[:, 0].long(),
+                    "cls": targets[:, 1:2].long(),
+                    "bboxes": targets[:, 2:]
+                }
+
+                loss, _ = yolo_loss_fn(preds, batch)
+
+                loss = loss.sum()
+
                 total_val_loss += loss.item()
 
         avg_train = total_train_loss / len(train_loader)

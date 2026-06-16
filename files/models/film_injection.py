@@ -18,8 +18,7 @@ import torch
 import torch.nn as nn
 from pathlib import Path
 import sys
-sys.path.append(str(Path(__file__).resolve().parents[1]))
-from configs.task_config import FILM_CONFIG
+from files.configs.task_config import FILM_CONFIG
 
 
 # ── FiLM Layer ─────────────────────────────────────────────────────────────────
