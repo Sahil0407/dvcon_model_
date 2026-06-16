@@ -1,0 +1,10 @@
+ultralytics>=8.0.196
+torch>=2.0.0
+torchvision>=0.15.0
+sentence-transformers>=2.2.2
+numpy>=1.24.0
+opencv-python>=4.8.0
+pycocotools>=2.0.7
+tqdm>=4.65.0
+pyyaml>=6.0
+Pillow>=10.0.0
