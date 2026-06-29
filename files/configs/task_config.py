@@ -81,7 +81,7 @@ MODEL_CONFIG = {
     "num_tasks":        14,
     "num_classes":      14,                 # one class per task for task-aware detection
     "img_size":         640,
-    "batch_size":       16,
+    "batch_size":       8,
     "epochs":           100,
     "lr0":              0.01,
     "lrf":              0.01,
@@ -131,14 +131,14 @@ FILM_CONFIG = {
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 PATHS = {
-    "coco_root":        "./data/coco",
-    "train_images":     "./data/coco/images/train2017",
-    "val_images":       "./data/coco/images/val2017",
-    "train_ann":        "./data/coco/annotations/instances_train2017.json",
-    "val_ann":          "./data/coco/annotations/instances_val2017.json",
-    "filtered_train":   "./data/filtered/train",
-    "filtered_val":     "./data/filtered/val",
-    "task_embeddings":  "./data/task_embeddings.pt",
-    "dataset_yaml":     "./configs/dataset.yaml",
-    "output":           "./runs/",
+    "coco_root":        "./files/data/coco",
+    "train_images":     "./files/data/coco/images/train2017",
+    "val_images":       "./files/data/coco/images/val2017",
+    "train_ann":        "./files/data/coco/annotations/instances_train2017.json",
+    "val_ann":          "./files/data/coco/annotations/instances_val2017.json",
+    "filtered_train":   "./files/data/filtered/train",
+    "filtered_val":     "./files/data/filtered/val",
+    "task_embeddings":  "./files/data/task_embeddings.pt",
+    "dataset_yaml":     "./files/configs/dataset.yaml",
+    "output":           "./files/runs/",
 }

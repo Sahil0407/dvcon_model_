@@ -29,7 +29,7 @@ import yaml
 from tqdm import tqdm
 
 import sys
-from files.configs.task_config import (
+from configs.task_config import (
     TASK_NAMES, TASK_TO_COCO_CATS, PATHS,
     TASKS_NEEDING_CUSTOM_DATA,
 )

@@ -18,7 +18,7 @@ import torch
 import torch.nn as nn
 from pathlib import Path
 import sys
-from files.configs.task_config import FILM_CONFIG
+from configs.task_config import FILM_CONFIG
 
 
 # ── FiLM Layer ─────────────────────────────────────────────────────────────────

@@ -26,7 +26,8 @@ import torch
 import cv2
 from pathlib import Path
 from ultralytics import YOLO
-from ultralytics.utils.ops import non_max_suppression, scale_boxes
+from ultralytics.utils.ops import scale_boxes
+from ultralytics.utils.nms import non_max_suppression
 
 from typing import Optional, List
 from configs.task_config import TASK_NAMES, PATHS, MODEL_CONFIG, FILM_CONFIG

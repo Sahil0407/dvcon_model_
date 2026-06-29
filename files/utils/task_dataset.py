@@ -89,7 +89,7 @@ class TaskAwareCOCODataset(Dataset):
         # These have names like: {image_stem}_neg_t{task_id}.txt
         # They reference the same image but signal 'no object found' for that task.
         for lbl_path in sorted(self.lbl_dir.iterdir()):
-            if not lbl_path.stem.endswith("_neg_t"):
+            if "_neg_t" not in lbl_path.stem:
                 continue
             try:
                 parts = lbl_path.stem.rsplit("_neg_t", 1)

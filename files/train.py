@@ -25,10 +25,10 @@ import os
 import argparse
 import torch
 import torch.optim as optim
-from torch.optim.lr_scheduler import CosineAnnealingLR
 from pathlib import Path
 from datetime import datetime
 from ultralytics import YOLO
+from ultralytics.utils.nms import non_max_suppression
 
 from configs.task_config import MODEL_CONFIG, FILM_CONFIG, PATHS, TASK_NAMES
 from models.film_injection import FiLMHookManager
@@ -75,6 +75,40 @@ def get_phase(epoch: int) -> dict:
         if lo <= epoch <= hi:
             return phase
     return PHASES[-1]
+
+
+def compute_metrics(preds_list, targets_list):
+    """
+    Compute COCO mAP metrics using torchmetrics.
+
+    Uses default COCO IoU thresholds [0.5, 0.55, ..., 0.95] so that:
+      - map50 : mAP at IoU=0.5  (the standard PASCAL VOC metric)
+      - map   : mAP@0.5:0.95   (the standard COCO primary metric)
+
+    Parameters
+    ----------
+    preds_list : list of dicts
+        Each dict: {"boxes": [N,4], "scores": [N], "labels": [N]}
+    targets_list : list of dicts
+        Each dict: {"boxes": [M,4], "labels": [M]}
+
+    Returns
+    -------
+    metrics : dict with keys: map50, map
+    """
+    from torchmetrics.detection import MeanAveragePrecision
+
+    metric = MeanAveragePrecision()  # Uses default 10 COCO IoU thresholds
+    metric.update(preds_list, targets_list)
+    result = metric.compute()
+
+    map50 = result["map_50"].item()
+    map   = result["map"].item()
+
+    return {
+        "map50": round(map50, 4),
+        "map":   round(map, 4),
+    }
 
 
 def format_labels_for_loss(labels_list, device):
@@ -177,17 +211,46 @@ def train(resume_path=None):
     film_manager.register_hooks()
 
     # ── 4. Optimizer ───────────────────────────────────────────────────────────
-    # Start with only FiLM params; expand per phase
-    optimizer = optim.AdamW(
-        list(film_manager.film_parameters()),
-        lr=PHASES[0]["lr"],
-        weight_decay=1e-4,
-    )
-    scheduler = CosineAnnealingLR(
-        optimizer,
-        T_max  = MODEL_CONFIG["epochs"],
-        eta_min = 1e-6,
-    )
+    # Create ALL param groups upfront with LR=0 for frozen groups.
+    # At phase transitions, we just update each group's LR — no new groups added,
+    # so there's no conflict with the scheduler's internal base_lrs.
+    neck_params     = [p for i, l in enumerate(yolo_model.model.model) if 10 <= i <= 21 for p in l.parameters()]
+    backbone_params = [p for i, l in enumerate(yolo_model.model.model) if i < 10 for p in l.parameters()]
+
+    optimizer = optim.AdamW([
+        {"params": list(film_manager.film_parameters()), "lr": PHASES[0]["lr"]},   # FiLM
+        {"params": neck_params,                           "lr": 0.0},               # Neck (frozen)
+        {"params": backbone_params,                       "lr": 0.0},               # Backbone (frozen)
+    ], weight_decay=1e-4)
+
+    # Per-epoch LR schedule: each phase sets a constant LR for its active groups.
+    # No CosineAnnealingLR — it would fight with phase-based LR changes.
+    def set_phase_lr(epoch: int):
+        phase = get_phase(epoch)
+        lr = phase["lr"]
+        if epoch == PHASES[0]["epochs"][0]:  # Phase 1: FiLM only
+            freeze_backbone(yolo_model)
+            freeze_neck(yolo_model)
+            optimizer.param_groups[0]["lr"] = lr   # FiLM
+            optimizer.param_groups[1]["lr"] = 0.0  # Neck frozen
+            optimizer.param_groups[2]["lr"] = 0.0  # Backbone frozen
+            print(f"🔒 Phase 1: FiLM only (lr={lr})")
+        elif epoch == PHASES[1]["epochs"][0]:  # Phase 2: Neck + FiLM
+            freeze_backbone(yolo_model)
+            for i, layer in enumerate(yolo_model.model.model):
+                if 10 <= i <= 21:
+                    for p in layer.parameters():
+                        p.requires_grad_(True)
+            optimizer.param_groups[0]["lr"] = lr   # FiLM
+            optimizer.param_groups[1]["lr"] = lr   # Neck (unfrozen)
+            optimizer.param_groups[2]["lr"] = 0.0  # Backbone still frozen
+            print(f"🔓 Phase 2: Neck + FiLM (lr={lr})")
+        elif epoch == PHASES[2]["epochs"][0]:  # Phase 3: All layers
+            unfreeze_all(yolo_model)
+            optimizer.param_groups[0]["lr"] = lr   # FiLM
+            optimizer.param_groups[1]["lr"] = lr   # Neck
+            optimizer.param_groups[2]["lr"] = lr   # Backbone (unfrozen)
+            print(f"🔓 Phase 3: Full fine-tune (lr={lr})")
 
     # ── 5. Resume ──────────────────────────────────────────────────────────────
     start_epoch = 1
@@ -221,34 +284,8 @@ def train(resume_path=None):
     for epoch in range(start_epoch, MODEL_CONFIG["epochs"] + 1):
         phase = get_phase(epoch)
 
-        # Apply phase-specific freezing / unfreezing
-        if epoch == PHASES[0]["epochs"][0]:
-            freeze_backbone(yolo_model)
-            freeze_neck(yolo_model)
-            optimizer.param_groups[0]["lr"] = PHASES[0]["lr"]
-
-        elif epoch == PHASES[1]["epochs"][0]:
-            freeze_backbone(yolo_model)
-            for i, layer in enumerate(yolo_model.model.model):
-                if 10 <= i <= 21:
-                    for p in layer.parameters():
-                        p.requires_grad_(True)
-            # Add neck params to optimizer
-            optimizer.add_param_group({
-                "params": [p for i, l in enumerate(yolo_model.model.model)
-                           if 10 <= i <= 21 for p in l.parameters()],
-                "lr": PHASES[1]["lr"],
-            })
-            print("🔓 Neck unfrozen — neck + FiLM training begins")
-
-        elif epoch == PHASES[2]["epochs"][0]:
-            unfreeze_all(yolo_model)
-            optimizer.add_param_group({
-                "params": [p for i, l in enumerate(yolo_model.model.model)
-                           if i < 10 for p in l.parameters()],
-                "lr": PHASES[2]["lr"],
-            })
-            print("🔓 Full fine-tune phase begins")
+        # Apply phase-specific freezing / unfreezing + LR updates
+        set_phase_lr(epoch)
 
         # ── Train ──────────────────────────────────────────────────────────────
         yolo_model.model.train()
@@ -290,7 +327,6 @@ def train(resume_path=None):
                 max_norm=10.0
             )
             optimizer.step()
-            loss = loss.sum()
             total_train_loss += loss.item()
 
             if batch_idx % 50 == 0:
@@ -304,6 +340,10 @@ def train(resume_path=None):
         yolo_model.model.eval()
         film_manager.eval()
         total_val_loss = 0.0
+
+        # For mAP metrics: collect predictions + targets
+        all_val_preds   = []
+        all_val_targets = []
 
         with torch.no_grad():
             for images, labels_list, task_id in val_loader:
@@ -321,16 +361,61 @@ def train(resume_path=None):
                 }
 
                 loss, _ = yolo_loss_fn(preds, batch)
-
                 loss = loss.sum()
-
                 total_val_loss += loss.item()
+
+                # ── Compute detections for metrics ──────────────────────────
+                dets_per_img = non_max_suppression(
+                    preds, conf_thres=0.001, iou_thres=0.5,  # low threshold to capture all
+                    max_det=100
+                )
+
+                for b_idx, (dets, labels) in enumerate(zip(dets_per_img, labels_list)):
+                    # ── Predictions ──────────────────────────────────────────
+                    if dets is not None and len(dets):
+                        boxes  = dets[:, :4].cpu()  # [x1, y1, x2, y2]
+                        scores = dets[:, 4].cpu()
+                        labels_pred = dets[:, 5].long().cpu()
+                    else:
+                        boxes  = torch.zeros((0, 4))
+                        scores = torch.zeros(0)
+                        labels_pred = torch.zeros(0, dtype=torch.long)
+
+                    # ── Ground Truth ─────────────────────────────────────────
+                    if labels.numel() > 0:
+                        # labels: [N, 5] → (task_id, cx, cy, w, h)
+                        # Convert cxcywh → xyxy for torchmetrics
+                        gt_boxes = labels[:, 1:5].clone()  # cx, cy, w, h
+                        cx, cy, w, h = gt_boxes[:, 0], gt_boxes[:, 1], gt_boxes[:, 2], gt_boxes[:, 3]
+                        gt_boxes_xyxy = torch.stack([
+                            cx - w/2, cy - h/2, cx + w/2, cy + h/2
+                        ], dim=1)
+                        # Scale from normalized [0,1] to pixel coords at img_size
+                        gt_boxes_xyxy *= MODEL_CONFIG["img_size"]
+                        gt_labels = labels[:, 0].long()
+                    else:
+                        gt_boxes_xyxy = torch.zeros((0, 4))
+                        gt_labels = torch.zeros(0, dtype=torch.long)
+
+                    all_val_preds.append({
+                        "boxes": boxes,
+                        "scores": scores,
+                        "labels": labels_pred,
+                    })
+                    all_val_targets.append({
+                        "boxes": gt_boxes_xyxy,
+                        "labels": gt_labels,
+                    })
 
         avg_train = total_train_loss / len(train_loader)
         avg_val   = total_val_loss   / len(val_loader)
-        scheduler.step()
 
-        print(f"\n📊 Epoch {epoch:3d} Summary | Train Loss: {avg_train:.4f} | Val Loss: {avg_val:.4f}\n")
+        # ── Compute mAP / Precision / Recall ────────────────────────────────
+        val_metrics = compute_metrics(all_val_preds, all_val_targets)
+
+        print(f"\n📊 Epoch {epoch:3d} Summary")
+        print(f"   Train Loss: {avg_train:.4f} | Val Loss: {avg_val:.4f}")
+        print(f"   mAP@0.5: {val_metrics['map50']:.4f} | mAP@0.5:0.95: {val_metrics['map']:.4f}\n")
 
         # ── Save ───────────────────────────────────────────────────────────────
         if epoch % MODEL_CONFIG["save_period"] == 0:

@@ -14,6 +14,6 @@ names:
   12: extinguish fire
   13: pound carpet
 nc: 14
-path: /home/sahil/dvcon_model/files
-train: /home/sahil/dvcon_model/files/data/filtered/train/images
-val: /home/sahil/dvcon_model/files/data/filtered/val/images
+path: /home/vishwajitsarnobat/Workspace/dvcon_model_/files
+train: /home/vishwajitsarnobat/Workspace/dvcon_model_/files/data/filtered/train/images
+val: /home/vishwajitsarnobat/Workspace/dvcon_model_/files/data/filtered/val/images
